@@ -150,29 +150,13 @@ def process_uploaded_file(uploaded_file):
             return file_content.decode('utf-8')
         except:
             return f"Could not extract text from {uploaded_file.type} file"
-    """Create a sample cap table for demonstration"""
-    return pd.DataFrame({
-        'Security_Type': ['Common Stock', 'Common Stock', 'Series A Preferred', 'Series A Preferred', 
-                         'Employee Options', 'Employee Options', 'Warrant', 'SAFE Note'],
-        'Holder_Name': ['Founder A', 'Founder B', 'Investor 1', 'Investor 2', 
-                       'Employee 1', 'Employee 2', 'Advisor 1', 'Angel Investor'],
-        'Shares_Outstanding': [2500000, 2500000, 1000000, 500000, 50000, 25000, 10000, 0],
-        'Shares_Authorized': [10000000, 10000000, 1500000, 1500000, 500000, 500000, 50000, 0],
-        'Price_Per_Share': [0.001, 0.001, 2.00, 2.00, 0.50, 0.50, 1.00, 0],
-        'Valuation_Cap': [None, None, None, None, None, None, None, 8000000],
-        'Conversion_Terms': ['1:1', '1:1', '1:1', '1:1', 'Exercise', 'Exercise', 'Exercise', 'Auto'],
-        'Vesting_Schedule': ['4yr/1yr cliff', '4yr/1yr cliff', 'None', 'None', 
-                           '4yr/1yr cliff', '4yr/1yr cliff', '2yr/6mo cliff', 'None'],
-        'Issue_Date': ['2022-01-01', '2022-01-01', '2023-06-01', '2023-06-01', 
-                      '2022-06-01', '2023-01-01', '2022-12-01', '2023-03-01']
-    })
 
-def analyze_document_with_ai(file_content: str, file_name: str, document_type: str) -> Dict[str, Any]:
+def analyze_document_with_ai(file_content, file_name, document_type):
     """Analyze document content using Claude API"""
     client = get_anthropic_client()
     
     if not client:
-        st.error("❌ Claude API key not configured. Please set ANTHROPIC_API_KEY environment variable.")
+        st.error("❌ Claude API key not configured. Please set ANTHROPIC_API_KEY.")
         return {
             'document_type': document_type,
             'file_name': file_name,
@@ -188,7 +172,7 @@ def analyze_document_with_ai(file_content: str, file_name: str, document_type: s
         Analyze this Certificate of Incorporation document and extract the following information:
         
         Document content:
-        {file_content[:4000]}  # Limit content to avoid token limits
+        {file_content[:4000]}
         
         Please extract and return in JSON format:
         1. Authorized shares by class (common, preferred)
@@ -332,7 +316,7 @@ def analyze_document_with_ai(file_content: str, file_name: str, document_type: s
         5. Fully diluted share count
         
         Format as JSON with keys:
-        - shareholders: [{"name": "name", "shares": number, "class": "class"}]
+        - shareholders: [{{"name": "name", "shares": number, "class": "class"}}]
         - total_shares: number
         - option_pool_size: number
         - compliance_items: ["list"]
@@ -385,7 +369,7 @@ def analyze_document_with_ai(file_content: str, file_name: str, document_type: s
             'extracted_data': extracted_data,
             'compliance_items': extracted_data.get('compliance_items', []),
             'issues_found': extracted_data.get('issues_found', []),
-            'confidence_score': 0.85,  # Could be improved with actual confidence scoring
+            'confidence_score': 0.85,
             'raw_response': response_text
         }
         
@@ -401,8 +385,24 @@ def analyze_document_with_ai(file_content: str, file_name: str, document_type: s
         }
 
 def create_sample_cap_table():
+    """Create a sample cap table for demonstration"""
+    return pd.DataFrame({
+        'Security_Type': ['Common Stock', 'Common Stock', 'Series A Preferred', 'Series A Preferred', 
+                         'Employee Options', 'Employee Options', 'Warrant', 'SAFE Note'],
+        'Holder_Name': ['Founder A', 'Founder B', 'Investor 1', 'Investor 2', 
+                       'Employee 1', 'Employee 2', 'Advisor 1', 'Angel Investor'],
+        'Shares_Outstanding': [2500000, 2500000, 1000000, 500000, 50000, 25000, 10000, 0],
+        'Shares_Authorized': [10000000, 10000000, 1500000, 1500000, 500000, 500000, 50000, 0],
+        'Price_Per_Share': [0.001, 0.001, 2.00, 2.00, 0.50, 0.50, 1.00, 0],
+        'Valuation_Cap': [None, None, None, None, None, None, None, 8000000],
+        'Conversion_Terms': ['1:1', '1:1', '1:1', '1:1', 'Exercise', 'Exercise', 'Exercise', 'Auto'],
+        'Vesting_Schedule': ['4yr/1yr cliff', '4yr/1yr cliff', 'None', 'None', 
+                           '4yr/1yr cliff', '4yr/1yr cliff', '2yr/6mo cliff', 'None'],
+        'Issue_Date': ['2022-01-01', '2022-01-01', '2023-06-01', '2023-06-01', 
+                      '2022-06-01', '2023-01-01', '2022-12-01', '2023-03-01']
+    })
 
-def check_compliance_item(item: str, analysis_results: Dict) -> tuple:
+def check_compliance_item(item, analysis_results):
     """Check if a compliance item is satisfied based on analysis results"""
     # This would contain actual logic to verify compliance
     # For demo purposes, we'll simulate some checks
@@ -433,7 +433,7 @@ def check_compliance_item(item: str, analysis_results: Dict) -> tuple:
         # Default to requiring manual review
         return None, "Requires manual review"
 
-def generate_tie_out_report(analysis_results: Dict, checklist_status: Dict, discrepancies: List) -> str:
+def generate_tie_out_report(analysis_results, checklist_status, discrepancies):
     """Generate a comprehensive tie-out report"""
     report = f"""
 # Cap Table Tie-Out Report
@@ -652,7 +652,7 @@ if workflow_step == "📄 Document Upload":
             
             st.session_state.uploaded_files.update(sample_docs)
             st.success("✅ Sample documents loaded!")
-            st.experimental_rerun()
+            st.rerun()
 
 elif workflow_step == "🤖 AI Analysis":
     st.header("🤖 AI-Powered Document Analysis")
@@ -675,7 +675,7 @@ elif workflow_step == "🤖 AI Analysis":
                 for i, (filename, doc_info) in enumerate(st.session_state.uploaded_files.items()):
                     status_text.text(f"Analyzing: {filename}")
                     
-                    # Simulate AI analysis
+                    # Analyze with Claude AI
                     analysis = analyze_document_with_ai(
                         doc_info['content'], 
                         filename, 
