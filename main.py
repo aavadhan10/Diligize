@@ -402,7 +402,7 @@ def analyze_document_with_ai(file_content: str, file_name: str, document_type: s
 
 def create_sample_cap_table():
 
-def check_compliance_item(item: str, analysis_results: Dict) -> tuple[bool, str]:
+def check_compliance_item(item: str, analysis_results: Dict) -> tuple:
     """Check if a compliance item is satisfied based on analysis results"""
     # This would contain actual logic to verify compliance
     # For demo purposes, we'll simulate some checks
@@ -411,9 +411,12 @@ def check_compliance_item(item: str, analysis_results: Dict) -> tuple[bool, str]
         # Check if 409A valuation is current (within 1 year)
         for doc_analysis in analysis_results.values():
             if 'grant_date' in doc_analysis.get('extracted_data', {}):
-                grant_date = datetime.strptime(doc_analysis['extracted_data']['grant_date'], '%Y-%m-%d')
-                if (datetime.now() - grant_date).days < 365:
-                    return True, "409A valuation within safe harbor period"
+                try:
+                    grant_date = datetime.strptime(doc_analysis['extracted_data']['grant_date'], '%Y-%m-%d')
+                    if (datetime.now() - grant_date).days < 365:
+                        return True, "409A valuation within safe harbor period"
+                except:
+                    pass
         return False, "409A valuation may be stale"
     
     elif "Board approval" in item:
