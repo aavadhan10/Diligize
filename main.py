@@ -9,6 +9,11 @@ import base64
 from typing import Dict, List, Any
 import re
 import numpy as np
+import anthropic
+import PyPDF2
+from docx import Document
+import openpyxl
+import os
 
 # Configure page
 st.set_page_config(
@@ -75,7 +80,76 @@ DD_CHECKLIST = {
     }
 }
 
-def create_sample_cap_table():
+# Initialize Anthropic client
+@st.cache_resource
+def get_anthropic_client():
+    api_key = os.getenv("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    return anthropic.Anthropic(api_key=api_key)
+
+def extract_text_from_pdf(file_content):
+    """Extract text from PDF file"""
+    try:
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        st.error(f"Error reading PDF: {str(e)}")
+        return ""
+
+def extract_text_from_docx(file_content):
+    """Extract text from DOCX file"""
+    try:
+        doc = Document(io.BytesIO(file_content))
+        text = ""
+        for paragraph in doc.paragraphs:
+            text += paragraph.text + "\n"
+        return text
+    except Exception as e:
+        st.error(f"Error reading DOCX: {str(e)}")
+        return ""
+
+def extract_text_from_xlsx(file_content):
+    """Extract text from Excel file"""
+    try:
+        workbook = openpyxl.load_workbook(io.BytesIO(file_content))
+        text = ""
+        for sheet_name in workbook.sheetnames:
+            sheet = workbook[sheet_name]
+            text += f"Sheet: {sheet_name}\n"
+            for row in sheet.iter_rows(values_only=True):
+                row_text = " | ".join([str(cell) if cell is not None else "" for cell in row])
+                if row_text.strip():
+                    text += row_text + "\n"
+            text += "\n"
+        return text
+    except Exception as e:
+        st.error(f"Error reading Excel: {str(e)}")
+        return ""
+
+def process_uploaded_file(uploaded_file):
+    """Process uploaded file and extract text content"""
+    file_content = uploaded_file.read()
+    
+    if uploaded_file.type == "application/pdf":
+        return extract_text_from_pdf(file_content)
+    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return extract_text_from_docx(file_content)
+    elif uploaded_file.type in ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                                "application/vnd.ms-excel"]:
+        return extract_text_from_xlsx(file_content)
+    elif uploaded_file.type == "text/plain":
+        return file_content.decode('utf-8')
+    elif uploaded_file.type == "text/csv":
+        return file_content.decode('utf-8')
+    else:
+        try:
+            return file_content.decode('utf-8')
+        except:
+            return f"Could not extract text from {uploaded_file.type} file"
     """Create a sample cap table for demonstration"""
     return pd.DataFrame({
         'Security_Type': ['Common Stock', 'Common Stock', 'Series A Preferred', 'Series A Preferred', 
@@ -94,68 +168,239 @@ def create_sample_cap_table():
     })
 
 def analyze_document_with_ai(file_content: str, file_name: str, document_type: str) -> Dict[str, Any]:
-    """Simulate AI analysis of document content"""
-    # This would integrate with Claude API in production
-    analysis = {
-        'document_type': document_type,
-        'file_name': file_name,
-        'extracted_data': {},
-        'compliance_items': [],
-        'issues_found': [],
-        'confidence_score': 0.85
-    }
+    """Analyze document content using Claude API"""
+    client = get_anthropic_client()
     
-    # Simulate different analysis based on document type
-    if 'charter' in document_type.lower() or 'incorporation' in document_type.lower():
-        analysis['extracted_data'] = {
-            'authorized_shares': {'common': 10000000, 'preferred': 2000000},
-            'par_value': 0.001,
-            'incorporation_date': '2022-01-01',
-            'state': 'Delaware'
+    if not client:
+        st.error("❌ Claude API key not configured. Please set ANTHROPIC_API_KEY environment variable.")
+        return {
+            'document_type': document_type,
+            'file_name': file_name,
+            'extracted_data': {},
+            'compliance_items': [],
+            'issues_found': ["API key not configured"],
+            'confidence_score': 0.0
         }
-        analysis['compliance_items'] = ['Charter properly filed', 'Share classes defined']
+    
+    # Create analysis prompt based on document type
+    if 'charter' in document_type.lower() or 'incorporation' in document_type.lower():
+        prompt = f"""
+        Analyze this Certificate of Incorporation document and extract the following information:
+        
+        Document content:
+        {file_content[:4000]}  # Limit content to avoid token limits
+        
+        Please extract and return in JSON format:
+        1. Authorized shares by class (common, preferred)
+        2. Par value per share
+        3. Incorporation date
+        4. State of incorporation
+        5. Any special rights or preferences
+        6. Board approval requirements
+        7. Any compliance issues or missing elements
+        
+        Format your response as JSON with these keys:
+        - authorized_shares: {{"common": number, "preferred": number}}
+        - par_value: number
+        - incorporation_date: "YYYY-MM-DD"
+        - state: "state name"
+        - special_rights: ["list of rights"]
+        - compliance_items: ["list of compliant items"]
+        - issues_found: ["list of issues"]
+        """
         
     elif 'stock purchase' in document_type.lower() or 'spa' in document_type.lower():
-        analysis['extracted_data'] = {
-            'purchaser': 'Investor 1',
-            'shares_purchased': 1000000,
-            'price_per_share': 2.00,
-            'purchase_date': '2023-06-01',
-            'total_consideration': 2000000
-        }
-        analysis['compliance_items'] = ['Board approval referenced', 'Purchase price confirmed']
+        prompt = f"""
+        Analyze this Stock Purchase Agreement and extract:
+        
+        Document content:
+        {file_content[:4000]}
+        
+        Extract and return in JSON format:
+        1. Purchaser name
+        2. Number of shares purchased
+        3. Price per share
+        4. Total consideration
+        5. Purchase date
+        6. Share class/type
+        7. Board approval status
+        8. Compliance with preemptive rights
+        
+        Format as JSON with keys:
+        - purchaser: "name"
+        - shares_purchased: number
+        - price_per_share: number
+        - total_consideration: number
+        - purchase_date: "YYYY-MM-DD"
+        - share_class: "class name"
+        - compliance_items: ["list"]
+        - issues_found: ["list"]
+        """
         
     elif 'option' in document_type.lower():
-        analysis['extracted_data'] = {
-            'grantee': 'Employee 1',
-            'shares_granted': 50000,
-            'exercise_price': 0.50,
-            'vesting_schedule': '4 years, 1 year cliff',
-            'grant_date': '2022-06-01'
-        }
-        analysis['compliance_items'] = ['409A valuation referenced', 'Board approval confirmed']
+        prompt = f"""
+        Analyze this Option Grant Agreement and extract:
+        
+        Document content:
+        {file_content[:4000]}
+        
+        Extract and return in JSON format:
+        1. Grantee name
+        2. Number of shares granted
+        3. Exercise price
+        4. Vesting schedule
+        5. Grant date
+        6. Expiration date
+        7. Board approval reference
+        8. 409A valuation compliance
+        
+        Format as JSON with keys:
+        - grantee: "name"
+        - shares_granted: number
+        - exercise_price: number
+        - vesting_schedule: "description"
+        - grant_date: "YYYY-MM-DD"
+        - expiration_date: "YYYY-MM-DD"
+        - compliance_items: ["list"]
+        - issues_found: ["list"]
+        """
         
     elif 'warrant' in document_type.lower():
-        analysis['extracted_data'] = {
-            'holder': 'Advisor 1',
-            'shares': 10000,
-            'exercise_price': 1.00,
-            'expiration_date': '2027-12-01',
-            'issue_date': '2022-12-01'
-        }
-        analysis['compliance_items'] = ['Exercise terms defined', 'Termination provisions included']
+        prompt = f"""
+        Analyze this Warrant Agreement and extract:
+        
+        Document content:
+        {file_content[:4000]}
+        
+        Extract and return in JSON format:
+        1. Warrant holder name
+        2. Number of shares
+        3. Exercise price
+        4. Expiration date
+        5. Issue date
+        6. Termination provisions
+        7. Anti-dilution provisions
+        
+        Format as JSON with keys:
+        - holder: "name"
+        - shares: number
+        - exercise_price: number
+        - expiration_date: "YYYY-MM-DD"
+        - issue_date: "YYYY-MM-DD"
+        - compliance_items: ["list"]
+        - issues_found: ["list"]
+        """
         
     elif 'safe' in document_type.lower() or 'convertible' in document_type.lower():
-        analysis['extracted_data'] = {
-            'investor': 'Angel Investor',
-            'investment_amount': 500000,
-            'valuation_cap': 8000000,
-            'discount_rate': 0.20,
-            'issue_date': '2023-03-01'
-        }
-        analysis['compliance_items'] = ['Conversion triggers defined', 'Valuation cap set']
+        prompt = f"""
+        Analyze this SAFE or Convertible Note and extract:
+        
+        Document content:
+        {file_content[:4000]}
+        
+        Extract and return in JSON format:
+        1. Investor name
+        2. Investment amount
+        3. Valuation cap
+        4. Discount rate
+        5. Issue date
+        6. Conversion triggers
+        7. Pro rata rights
+        
+        Format as JSON with keys:
+        - investor: "name"
+        - investment_amount: number
+        - valuation_cap: number
+        - discount_rate: number (as decimal)
+        - issue_date: "YYYY-MM-DD"
+        - compliance_items: ["list"]
+        - issues_found: ["list"]
+        """
+        
+    elif 'cap' in document_type.lower():
+        prompt = f"""
+        Analyze this Cap Table and extract:
+        
+        Document content:
+        {file_content[:4000]}
+        
+        Extract and return in JSON format:
+        1. All shareholders and their holdings
+        2. Share classes and counts
+        3. Ownership percentages
+        4. Option pool size
+        5. Fully diluted share count
+        
+        Format as JSON with keys:
+        - shareholders: [{"name": "name", "shares": number, "class": "class"}]
+        - total_shares: number
+        - option_pool_size: number
+        - compliance_items: ["list"]
+        - issues_found: ["list"]
+        """
+    else:
+        prompt = f"""
+        Analyze this legal document and extract any relevant capitalization information:
+        
+        Document content:
+        {file_content[:4000]}
+        
+        Look for information about shares, ownership, equity, options, warrants, or convertible instruments.
+        Return findings in JSON format with keys:
+        - extracted_data: {{key: value pairs}}
+        - compliance_items: ["list"]
+        - issues_found: ["list"]
+        """
     
-    return analysis
+    try:
+        # Call Claude API
+        response = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=2000,
+            temperature=0.1,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        )
+        
+        # Parse response
+        response_text = response.content[0].text
+        
+        # Try to extract JSON from response
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            try:
+                extracted_data = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                extracted_data = {"error": "Could not parse JSON response"}
+        else:
+            extracted_data = {"raw_response": response_text}
+        
+        return {
+            'document_type': document_type,
+            'file_name': file_name,
+            'extracted_data': extracted_data,
+            'compliance_items': extracted_data.get('compliance_items', []),
+            'issues_found': extracted_data.get('issues_found', []),
+            'confidence_score': 0.85,  # Could be improved with actual confidence scoring
+            'raw_response': response_text
+        }
+        
+    except Exception as e:
+        st.error(f"Error calling Claude API: {str(e)}")
+        return {
+            'document_type': document_type,
+            'file_name': file_name,
+            'extracted_data': {},
+            'compliance_items': [],
+            'issues_found': [f"API Error: {str(e)}"],
+            'confidence_score': 0.0
+        }
+
+def create_sample_cap_table():
 
 def check_compliance_item(item: str, analysis_results: Dict) -> tuple[bool, str]:
     """Check if a compliance item is satisfied based on analysis results"""
@@ -236,6 +481,27 @@ This report summarizes the cap table tie-out analysis performed on {len(analysis
 st.title("⚖️ Cap Table Tie-Out Analysis Tool")
 st.markdown("**AI-Powered Legal Document Analysis & Compliance Verification**")
 
+# API Key Configuration
+if not get_anthropic_client():
+    st.error("🔑 **Claude API Key Required**")
+    st.markdown("""
+    To use this application, you need to configure your Anthropic API key:
+    
+    **Option 1: Environment Variable (Recommended)**
+    ```bash
+    export ANTHROPIC_API_KEY="your-api-key-here"
+    ```
+    
+    **Option 2: Streamlit Secrets**
+    Create `.streamlit/secrets.toml`:
+    ```toml
+    ANTHROPIC_API_KEY = "your-api-key-here"
+    ```
+    
+    Get your API key from: https://console.anthropic.com/
+    """)
+    st.stop()
+
 # Sidebar Navigation
 with st.sidebar:
     st.header("📋 Analysis Workflow")
@@ -289,14 +555,10 @@ if workflow_step == "📄 Document Upload":
             
             # Process and classify documents
             for file in uploaded_files:
-                file_content = file.read()
-                if isinstance(file_content, bytes):
-                    try:
-                        file_content = file_content.decode('utf-8')
-                    except:
-                        file_content = str(file_content)
+                # Extract text content from file
+                file_content = process_uploaded_file(file)
                 
-                # Auto-classify documents based on filename
+                # Auto-classify documents based on filename and content
                 filename_lower = file.name.lower()
                 if any(term in filename_lower for term in ['charter', 'incorporation', 'certificate']):
                     doc_type = "Charter Document"
@@ -318,7 +580,8 @@ if workflow_step == "📄 Document Upload":
                     'content': file_content,
                     'type': doc_type,
                     'size': len(file_content),
-                    'upload_time': datetime.now()
+                    'upload_time': datetime.now(),
+                    'original_file': file
                 }
                 
                 # Display file info
